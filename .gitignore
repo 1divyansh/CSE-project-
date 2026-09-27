@@ -1,8 +1,2 @@
 __pycache__/
 *.pyc
-
-# runtime data written by the app
-group_data.txt
-audit_log.txt
-export.txt
-report.txt
