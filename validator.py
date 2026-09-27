@@ -322,7 +322,7 @@ def validate_percentage_split(percent_texts):
         running += parsed[name]
     if running != FULL_PERCENT:
         raise ValidationError("Percentages must add up to 100, but they add up to "
-                              + _hundredths_str(running))
+                              + format_hundredths(running))
     return parsed
 
 
@@ -346,11 +346,11 @@ def validate_split_members(split_names, group_names):
 # Formatting helpers for error messages (kept local so validator has no deps)
 # ----------------------------------------------------------------------
 
-def _hundredths_str(value):
+def format_hundredths(value):
     whole = value // 100
     frac = value % 100
     return str(whole) + "." + ("0" if frac < 10 else "") + str(frac)
 
 
 def _paise_str(paise):
-    return "Rs. " + _hundredths_str(paise)
+    return "Rs. " + format_hundredths(paise)
