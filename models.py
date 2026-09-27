@@ -12,7 +12,8 @@ are no floating-point rounding errors.
 SPLIT_EQUAL = "equal"
 SPLIT_EXACT = "exact"
 SPLIT_PERCENTAGE = "percentage"
-SPLIT_TYPES = (SPLIT_EQUAL, SPLIT_EXACT, SPLIT_PERCENTAGE)
+SPLIT_SHARES = "shares"
+SPLIT_TYPES = (SPLIT_EQUAL, SPLIT_EXACT, SPLIT_PERCENTAGE, SPLIT_SHARES)
 
 
 def format_paise(paise):
@@ -45,7 +46,7 @@ class Expense:
     amount     : total in paise
     paid_by    : name of the member who paid
     shares     : dict {member_name: paise they owe}; values add up to amount
-    split_type : "equal", "exact" or "percentage"
+    split_type : "equal", "exact", "percentage" or "shares"
     """
 
     def __init__(self, description, amount, paid_by, shares, split_type=SPLIT_EQUAL):
