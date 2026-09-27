@@ -11,12 +11,13 @@ save) and a print_* wrapper that prints it.
 
 from models import format_paise
 from validator import ValidationError, date_sort_key, format_hundredths
-from ledger import check_invariant
+from ledger import check_invariant, list_expenses
 from settlement_optimizer import plan_settlements
 from split_calculator import split_shares
 
 
 DEFAULT_EXPORT_FILE = "export.txt"
+DEFAULT_REPORT_FILE = "report.txt"
 MAX_CELL_WIDTH = 32
 BAR_WIDTH = 20
 
@@ -262,6 +263,45 @@ def build_category_spending(group):
 
 def print_category_spending(group):
     print(build_category_spending(group))
+
+
+# ----------------------------------------------------------------------
+# Expense list and full group report
+# ----------------------------------------------------------------------
+
+def build_expense_list(group):
+    """All expenses in date order."""
+    heading = _title("Expenses - " + group.name)
+    expenses = list_expenses(group)
+    if len(expenses) == 0:
+        return heading + "\nNo expenses recorded yet."
+    rows = []
+    for expense in expenses:
+        rows.append([str(expense.expense_id), expense.date, expense.description,
+                     expense.category, expense.paid_by, format_money(expense.amount),
+                     expense.split_type + " (" + str(len(expense.shares)) + ")"])
+    return heading + "\n" + format_table(
+        ["#", "Date", "Description", "Category", "Paid by", "Amount", "Split (people)"],
+        rows, align="rllllrl")
+
+
+def print_expense_list(group):
+    print(build_expense_list(group))
+
+
+def build_group_report(group):
+    """Balance sheet, settle-up plan, category spending and expense list together."""
+    sections = [build_balance_sheet(group), build_settle_up_plan(group),
+                build_category_spending(group), build_expense_list(group)]
+    return "SplitSquad report\n\n" + "\n\n".join(sections) + "\n"
+
+
+def export_group_report(group, path=DEFAULT_REPORT_FILE):
+    """Write the full table report to a text file. Returns the path."""
+    text = build_group_report(group)
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write(text)
+    return path
 
 
 # ----------------------------------------------------------------------

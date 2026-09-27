@@ -309,6 +309,23 @@ def parse_exact_split(total_paise, share_texts):
     return validate_exact_split(total_paise, shares)
 
 
+def parse_whole_number(text, label, minimum=0, maximum=None):
+    """Parse a non-negative whole number such as a share count: "2" -> 2."""
+    if not isinstance(text, str):
+        raise ValidationError(label + " must be text")
+    text = text.strip()
+    if text == "":
+        raise ValidationError(label + " cannot be empty")
+    if not is_ascii_digits(text):
+        raise ValidationError(label + " must be a whole number like 1, 2 or 3")
+    value = digits_to_int(text)
+    if value < minimum:
+        raise ValidationError(label + " must be at least " + str(minimum))
+    if maximum is not None and value > maximum:
+        raise ValidationError(label + " must be at most " + str(maximum))
+    return value
+
+
 def parse_percentage(text):
     """
     Convert a percentage string to hundredths of a percent.
