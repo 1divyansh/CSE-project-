@@ -26,7 +26,7 @@ FULL_PERCENT = 100 * PERCENT_SCALE
 # Low-level helpers
 # ----------------------------------------------------------------------
 
-def _is_ascii_digits(text):
+def is_ascii_digits(text):
     """
     True if `text` is non-empty and made only of '0'-'9'.
 
@@ -41,7 +41,7 @@ def _is_ascii_digits(text):
     return True
 
 
-def _digits_to_int(text):
+def digits_to_int(text):
     """Convert a string of ASCII digits to an int without calling int()."""
     value = 0
     for ch in text:
@@ -89,13 +89,13 @@ def _parse_fixed_point(text, decimals, label):
     if "," in whole_part:
         groups = whole_part.split(",")
         for group in groups:
-            if not _is_ascii_digits(group):
+            if not is_ascii_digits(group):
                 raise ValidationError(label + " has misplaced commas")
         whole_part = "".join(groups)
 
-    if whole_part != "" and not _is_ascii_digits(whole_part):
+    if whole_part != "" and not is_ascii_digits(whole_part):
         raise ValidationError(label + " must contain only digits and one '.'")
-    if frac_part != "" and not _is_ascii_digits(frac_part):
+    if frac_part != "" and not is_ascii_digits(frac_part):
         raise ValidationError(label + " must contain only digits after the '.'")
     if len(frac_part) > decimals:
         raise ValidationError(label + " can have at most " + str(decimals) + " decimal places")
@@ -108,8 +108,8 @@ def _parse_fixed_point(text, decimals, label):
     for _ in range(decimals):
         scale *= 10
 
-    whole_value = _digits_to_int(whole_part) if whole_part != "" else 0
-    frac_value = _digits_to_int(frac_part) if frac_part != "" else 0
+    whole_value = digits_to_int(whole_part) if whole_part != "" else 0
+    frac_value = digits_to_int(frac_part) if frac_part != "" else 0
     return whole_value * scale + frac_value
 
 
@@ -175,13 +175,13 @@ def validate_date(text):
     day_str = text[0:2]
     month_str = text[3:5]
     year_str = text[6:10]
-    if not (_is_ascii_digits(day_str) and _is_ascii_digits(month_str)
-            and _is_ascii_digits(year_str)):
+    if not (is_ascii_digits(day_str) and is_ascii_digits(month_str)
+            and is_ascii_digits(year_str)):
         raise ValidationError("Day, month and year must be numbers: DD-MM-YYYY")
 
-    day = _digits_to_int(day_str)
-    month = _digits_to_int(month_str)
-    year = _digits_to_int(year_str)
+    day = digits_to_int(day_str)
+    month = digits_to_int(month_str)
+    year = digits_to_int(year_str)
 
     if year < MIN_YEAR or year > MAX_YEAR:
         raise ValidationError("Year must be between " + str(MIN_YEAR) + " and " + str(MAX_YEAR))
@@ -204,7 +204,23 @@ def is_valid_date(text):
 
 def date_sort_key(text):
     """(year, month, day) tuple so "DD-MM-YYYY" strings can be sorted chronologically."""
-    return (_digits_to_int(text[6:10]), _digits_to_int(text[3:5]), _digits_to_int(text[0:2]))
+    return (digits_to_int(text[6:10]), digits_to_int(text[3:5]), digits_to_int(text[0:2]))
+
+
+# ----------------------------------------------------------------------
+# Free text (descriptions, categories)
+# ----------------------------------------------------------------------
+
+def validate_text(text, label, max_length=60):
+    """Trim, collapse whitespace (including newlines) and length-check free text."""
+    if not isinstance(text, str):
+        raise ValidationError(label + " must be text")
+    cleaned = " ".join(text.split())
+    if cleaned == "":
+        raise ValidationError(label + " cannot be empty")
+    if len(cleaned) > max_length:
+        raise ValidationError(label + " must be at most " + str(max_length) + " characters")
+    return cleaned
 
 
 # ----------------------------------------------------------------------

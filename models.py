@@ -67,10 +67,15 @@ class Expense:
     shares   : dict {member_name: paise_owed}. The values must sum to `amount`.
                Computing shares from the split type is the caller's job;
                validator.py provides the checks.
+    split_values : the inputs the shares were computed from, kept so an edit
+               can recompute them - {name: paise} for exact, {name: hundredths
+               of a percent} for percentage, {name: share count} for shares,
+               None for equal.
     """
 
     def __init__(self, expense_id, description, amount, paid_by, date,
-                 split_type=SPLIT_EQUAL, shares=None):
+                 split_type=SPLIT_EQUAL, shares=None, category="General",
+                 split_values=None):
         _require_int(amount, "amount")
         if amount <= 0:
             raise ValueError("Expense amount must be positive")
@@ -88,6 +93,13 @@ class Expense:
             for name in shares:
                 _require_int(shares[name], "share for " + repr(name))
                 self.shares[name] = shares[name]
+        self.category = category
+        self.split_values = None
+        if split_values is not None:
+            self.split_values = {}
+            for name in split_values:
+                _require_int(split_values[name], "split value for " + repr(name))
+                self.split_values[name] = split_values[name]
 
     def participants(self):
         return list(self.shares.keys())
@@ -98,6 +110,7 @@ class Expense:
                 + ", amount=" + format_paise(self.amount)
                 + ", paid_by=" + repr(self.paid_by)
                 + ", date=" + repr(self.date)
+                + ", category=" + repr(self.category)
                 + ", split_type=" + repr(self.split_type)
                 + ", shares={" + ", ".join(
                     repr(n) + ": " + format_paise(p) for n, p in self.shares.items())
@@ -138,8 +151,9 @@ class Group:
         self.members = []
         self.expenses = []
         self.settlements = []
-        self._next_expense_id = 1
-        self._next_settlement_id = 1
+        # Ids are never reused, even after a delete, so the audit log stays unambiguous.
+        self.next_expense_id = 1
+        self.next_settlement_id = 1
         if members is not None:
             for member in members:
                 self.add_member(member)
@@ -164,7 +178,10 @@ class Group:
         if self.has_member(member.name):
             raise ValueError("Member " + repr(member.name) + " already exists in group")
         if member.member_id is None:
-            member.member_id = len(self.members) + 1
+            member.member_id = 1
+            for existing in self.members:
+                if existing.member_id >= member.member_id:
+                    member.member_id = existing.member_id + 1
         self.members.append(member)
         return member
 
@@ -173,8 +190,14 @@ class Group:
 
     # ---- expenses & settlements ---------------------------------------
 
-    def add_expense(self, expense):
-        """Attach an Expense after checking it references real members and balances."""
+    def get_expense(self, expense_id):
+        for expense in self.expenses:
+            if expense.expense_id == expense_id:
+                return expense
+        return None
+
+    def check_expense(self, expense):
+        """Raise ValueError unless the expense references real members and balances."""
         if not self.has_member(expense.paid_by):
             raise ValueError("Payer " + repr(expense.paid_by) + " is not in the group")
         total = 0
@@ -185,9 +208,16 @@ class Group:
         if total != expense.amount:
             raise ValueError("Shares total " + format_paise(total)
                              + " does not match expense " + format_paise(expense.amount))
+
+    def add_expense(self, expense):
+        """Attach an Expense after checking it references real members and balances."""
+        self.check_expense(expense)
         if expense.expense_id is None:
-            expense.expense_id = self._next_expense_id
-        self._next_expense_id = max(self._next_expense_id, expense.expense_id) + 1
+            expense.expense_id = self.next_expense_id
+        elif self.get_expense(expense.expense_id) is not None:
+            raise ValueError("Expense id " + str(expense.expense_id) + " is already used")
+        if expense.expense_id >= self.next_expense_id:
+            self.next_expense_id = expense.expense_id + 1
         self.expenses.append(expense)
         return expense
 
@@ -196,8 +226,9 @@ class Group:
             if not self.has_member(name):
                 raise ValueError(repr(name) + " is not in the group")
         if settlement.settlement_id is None:
-            settlement.settlement_id = self._next_settlement_id
-        self._next_settlement_id = max(self._next_settlement_id, settlement.settlement_id) + 1
+            settlement.settlement_id = self.next_settlement_id
+        if settlement.settlement_id >= self.next_settlement_id:
+            self.next_settlement_id = settlement.settlement_id + 1
         self.settlements.append(settlement)
         return settlement
 
