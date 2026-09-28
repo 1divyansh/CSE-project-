@@ -1,124 +1,101 @@
-"""
-models.py - Data classes for SplitSquad (in-memory only).
+# models.py
+# The data for SplitSquad. There are no classes here - everything is a
+# plain Python dictionary or list, and it only lives in memory while the
+# program is running.
+#
+# All money is stored as whole paise (an int). For example Rs. 12.50 is
+# stored as 1250. This way we never have float rounding problems.
+#
+# What the dictionaries look like:
+#
+#   group   = {"name": "Goa Trip",
+#              "members": ["Rahul", "Aman"],
+#              "expenses": [ ...expense dicts... ]}
+#
+#   expense = {"description": "Dinner",
+#              "amount": 50000,
+#              "payer": "Rahul",
+#              "participants": ["Rahul", "Aman"],
+#              "split_type": "equal",
+#              "shares": {"Rahul": 25000, "Aman": 25000}}
+#
+#   settlement = {"payer": "Aman", "payee": "Rahul", "amount": 25000}
 
-No imports. Everything lives in ordinary Python lists and dicts for the
-current session; nothing is saved when the program exits.
 
-Money is always stored as an int in paise (1 rupee = 100 paise), so there
-are no floating-point rounding errors.
-"""
+# The four ways an expense can be split
+SPLIT_TYPES = ["equal", "exact", "percentage", "shares"]
 
 
-SPLIT_EQUAL = "equal"
-SPLIT_EXACT = "exact"
-SPLIT_PERCENTAGE = "percentage"
-SPLIT_SHARES = "shares"
-SPLIT_TYPES = (SPLIT_EQUAL, SPLIT_EXACT, SPLIT_PERCENTAGE, SPLIT_SHARES)
+def create_group(name):
+    group = {
+        "name": name,
+        "members": [],
+        "expenses": [],
+    }
+    return group
+
+
+def create_expense(description, amount, payer, shares, split_type):
+    # The participants are just the people who have a share
+    participants = []
+    for name in shares:
+        participants.append(name)
+
+    expense = {
+        "description": description,
+        "amount": amount,
+        "payer": payer,
+        "participants": participants,
+        "split_type": split_type,
+        "shares": shares,
+    }
+    return expense
+
+
+def create_settlement(payer, payee, amount):
+    settlement = {
+        "payer": payer,
+        "payee": payee,
+        "amount": amount,
+    }
+    return settlement
+
+
+def find_member(group, name):
+    # Look for a member without caring about capital letters or extra spaces.
+    # Returns the name the way it was saved (e.g. "rahul" -> "Rahul"),
+    # or None if there is no such member.
+    wanted = name.strip().lower()
+    for member in group["members"]:
+        if member.lower() == wanted:
+            return member
+    return None
+
+
+def add_member(group, name):
+    group["members"].append(name)
+
+
+def total_spent(group):
+    total = 0
+    for expense in group["expenses"]:
+        total = total + expense["amount"]
+    return total
 
 
 def format_paise(paise):
-    """Turn integer paise into a rupee string: 125050 -> '1250.50', -5 -> '-0.05'."""
+    # Turns paise into a rupee string, e.g. 125050 -> "1250.50"
     sign = ""
     if paise < 0:
+        # Handle the minus sign first. Python's // and % work differently
+        # with negative numbers (-5 // 100 is -1), which would print wrong.
         sign = "-"
         paise = -paise
+
     rupees = paise // 100
-    cents = paise % 100
-    if cents < 10:
-        return sign + str(rupees) + ".0" + str(cents)
-    return sign + str(rupees) + "." + str(cents)
+    leftover_paise = paise % 100
 
-
-class Member:
-    """A person in the group. Names are unique within a group (ignoring case)."""
-
-    def __init__(self, name):
-        self.name = name
-
-    def __repr__(self):
-        return "Member(name=" + repr(self.name) + ")"
-
-
-class Expense:
-    """
-    One shared cost.
-
-    amount     : total in paise
-    paid_by    : name of the member who paid
-    shares     : dict {member_name: paise they owe}; values add up to amount
-    split_type : "equal", "exact", "percentage" or "shares"
-    """
-
-    def __init__(self, description, amount, paid_by, shares, split_type=SPLIT_EQUAL):
-        self.description = description
-        self.amount = amount
-        self.paid_by = paid_by
-        self.shares = shares
-        self.split_type = split_type
-
-    def __repr__(self):
-        share_text = []
-        for name in self.shares:
-            share_text.append(name + ": " + format_paise(self.shares[name]))
-        return ("Expense(description=" + repr(self.description)
-                + ", amount=" + format_paise(self.amount)
-                + ", paid_by=" + repr(self.paid_by)
-                + ", split_type=" + repr(self.split_type)
-                + ", shares={" + ", ".join(share_text) + "})")
-
-
-class Settlement:
-    """A payment of `amount` paise from `payer` to `payee` that clears a debt."""
-
-    def __init__(self, payer, payee, amount):
-        self.payer = payer
-        self.payee = payee
-        self.amount = amount
-
-    def __repr__(self):
-        return ("Settlement(" + self.payer + " pays " + self.payee
-                + " " + format_paise(self.amount) + ")")
-
-
-class Group:
-    """A group of members and their expenses for the current session."""
-
-    def __init__(self, name):
-        self.name = name
-        self.members = []    # list of Member
-        self.expenses = []   # list of Expense
-
-    def find_member(self, name):
-        """Return the Member with this name (case-insensitive), or None."""
-        wanted = name.strip().lower()
-        for member in self.members:
-            if member.name.lower() == wanted:
-                return member
-        return None
-
-    def member_names(self):
-        names = []
-        for member in self.members:
-            names.append(member.name)
-        return names
-
-    def add_member(self, name):
-        member = Member(name)
-        self.members.append(member)
-        return member
-
-    def add_expense(self, expense):
-        self.expenses.append(expense)
-        return expense
-
-    def total_spent(self):
-        total = 0
-        for expense in self.expenses:
-            total += expense.amount
-        return total
-
-    def __repr__(self):
-        return ("Group(name=" + repr(self.name)
-                + ", members=" + repr(self.member_names())
-                + ", expenses=" + str(len(self.expenses))
-                + ", total=" + format_paise(self.total_spent()) + ")")
+    if leftover_paise < 10:
+        # 7 paise should print as ".07", not ".7"
+        return sign + str(rupees) + ".0" + str(leftover_paise)
+    return sign + str(rupees) + "." + str(leftover_paise)

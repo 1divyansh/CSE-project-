@@ -1,164 +1,163 @@
-"""
-main.py - SplitSquad: a single-session, in-memory expense splitter.
+# main.py
+# SplitSquad - a simple expense splitter that runs in the terminal.
+# Run it with:  python main.py
+#
+# Everything is kept in memory in the global "group" dictionary below.
+# Nothing is saved, so all the data is lost when the program closes.
 
-Run with:  python main.py
-
-Everything lives in memory. Nothing is saved: when the program exits,
-all members and expenses are gone.
-
-Error handling is deliberately simple: each menu action runs inside a
-try/except. If anything goes wrong (bad amount, unknown member, splits that
-don't add up...), the error is printed and you're back at the menu.
-"""
-
-import models
-import validator
-import split_calculator
-import ledger
-import settlement_optimizer
-import report_generator
+from models import create_group, add_member, find_member, total_spent, format_paise
+from validator import parse_amount, parse_percentage, parse_share_count, check_member_name
+from validator import is_number_text, text_to_int
+from split_calculator import calculate_split
+from ledger import add_expense, calculate_balances
+from settlement_optimizer import simplify_debts
+from report_generator import print_balances, print_settlement_plan
 
 
-SPLIT_CHOICES = {
-    "1": models.SPLIT_EQUAL,
-    "2": models.SPLIT_EXACT,
-    "3": models.SPLIT_PERCENTAGE,
-    "4": models.SPLIT_SHARES,
-}
+# All the data for this session
+group = create_group("My Group")
 
-
-# ----------------------------------------------------------------------
-# Small input helpers
-# ----------------------------------------------------------------------
 
 def plural(count, word):
-    return str(count) + " " + word + ("" if count == 1 else "s")
+    if count == 1:
+        return str(count) + " " + word
+    return str(count) + " " + word + "s"
 
 
-def ask(prompt):
-    return input(prompt).strip()
-
-
-def pick_member(group, text):
-    """Accept a member's number (from the printed list) or their name."""
-    if text.isdigit():
-        number = int(text)
-        if 1 <= number <= len(group.members):
-            return group.members[number - 1].name
-        raise validator.ValidationError("There is no member number " + text)
-    member = group.find_member(text)
-    if member is None:
-        raise validator.ValidationError(text + " is not in the group")
-    return member.name
-
-
-def show_members(group):
+def show_members():
     number = 1
-    for member in group.members:
-        print("  " + str(number) + ". " + member.name)
-        number += 1
+    for member in group["members"]:
+        print("  " + str(number) + ". " + member)
+        number = number + 1
 
 
-# ----------------------------------------------------------------------
-# Menu actions
-# ----------------------------------------------------------------------
+def choose_member(text):
+    # The user can type a member's number from the list, or their name
+    text = text.strip()
+    members = group["members"]
 
-def add_member(group):
-    name = validator.validate_member_name(ask("New member name: "), group)
-    group.add_member(name)
-    print("Added " + name + ". The group now has " + plural(len(group.members), "member") + ".")
+    if is_number_text(text):
+        number = text_to_int(text)
+        if number >= 1 and number <= len(members):
+            return members[number - 1]
+        raise ValueError("There is no member number " + text)
+
+    name = find_member(group, text)
+    if name is None:
+        raise ValueError(text + " is not in the group")
+    return name
 
 
-def ask_split_values(split_type, amount, members):
-    """Ask each person for their value. Returns {name: value} or None for equal splits."""
-    if split_type == models.SPLIT_EQUAL:
+def menu_add_member():
+    name = input("New member name: ")
+    name = check_member_name(name, group)
+    add_member(group, name)
+    print("Added " + name + ". The group now has "
+          + plural(len(group["members"]), "member") + ".")
+
+
+def ask_split_values(split_type, people):
+    # Asks each person for their amount / percentage / shares.
+    # An equal split does not need anything, so it returns None.
+    if split_type == "equal":
         return None
+
     values = {}
-    for name in members:
-        if split_type == models.SPLIT_EXACT:
-            values[name] = validator.parse_amount(ask("  " + name + " owes (Rs.): "),
-                                                  allow_zero=True)
-        elif split_type == models.SPLIT_PERCENTAGE:
-            values[name] = validator.parse_percentage(ask("  " + name + "'s percentage: "))
+    for person in people:
+        if split_type == "exact":
+            text = input("  " + person + " owes (Rs.): ")
+            values[person] = parse_amount(text, True)
+        elif split_type == "percentage":
+            text = input("  " + person + "'s percentage: ")
+            values[person] = parse_percentage(text)
         else:
-            text = ask("  " + name + "'s shares (whole number): ")
-            if not text.isdigit():
-                raise validator.ValidationError("Shares must be a whole number like 1 or 2")
-            values[name] = int(text)
+            text = input("  " + person + "'s shares (whole number): ")
+            values[person] = parse_share_count(text)
     return values
 
 
-def add_expense(group, the_ledger):
-    if len(group.members) < 2:
+def menu_add_expense():
+    if len(group["members"]) < 2:
         print("Add at least two members first.")
         return
 
-    description = ask("Description: ")
-    amount = validator.parse_amount(ask("Amount (Rs.): "))
+    description = input("Description: ")
+    amount = parse_amount(input("Amount (Rs.): "))
 
-    show_members(group)
-    payer = pick_member(group, ask("Who paid? (number or name): "))
+    show_members()
+    payer = choose_member(input("Who paid? (number or name): "))
 
-    text = ask("Split between (numbers or names, comma-separated; blank = everyone): ")
-    if text == "":
-        members = group.member_names()
+    # Who shares this expense? Blank means everyone.
+    text = input("Split between (numbers or names, comma-separated; blank = everyone): ")
+    people = []
+    if text.strip() == "":
+        for member in group["members"]:
+            people.append(member)
     else:
-        members = []
         for part in text.split(","):
-            members.append(pick_member(group, part.strip()))
+            people.append(choose_member(part))
 
     print("Split type: 1. Equal  2. Exact amounts  3. Percentages  4. Shares")
-    choice = ask("Choose 1-4 (blank = equal): ") or "1"
-    if choice not in SPLIT_CHOICES:
-        raise validator.ValidationError("Split type must be 1, 2, 3 or 4")
-    split_type = SPLIT_CHOICES[choice]
+    choice = input("Choose 1-4 (blank = equal): ").strip()
+    if choice == "" or choice == "1":
+        split_type = "equal"
+    elif choice == "2":
+        split_type = "exact"
+    elif choice == "3":
+        split_type = "percentage"
+    elif choice == "4":
+        split_type = "shares"
+    else:
+        raise ValueError("Split type must be 1, 2, 3 or 4")
 
-    values = ask_split_values(split_type, amount, members)
+    values = ask_split_values(split_type, people)
 
-    # Preview who owes what before saving.
-    shares = split_calculator.calculate_split(split_type, amount, members, values)
+    # Show who owes what before saving
+    shares = calculate_split(split_type, amount, people, values)
     print("Each person owes:")
-    for name in shares:
-        print("  " + name.ljust(15) + models.format_paise(shares[name]).rjust(12))
-    if ask("Save this expense? (y/n): ").lower() not in ("y", "yes"):
+    for person in shares:
+        print("  " + person.ljust(15) + format_paise(shares[person]).rjust(12))
+
+    answer = input("Save this expense? (y/n): ").strip().lower()
+    if answer != "y" and answer != "yes":
         print("Expense discarded.")
         return
 
-    the_ledger.add_expense(description, amount, payer, members, split_type, values)
-    print("Saved. " + plural(len(group.expenses), "expense") + " so far, total Rs. "
-          + models.format_paise(group.total_spent()) + ".")
+    add_expense(group, description, amount, payer, people, split_type, values)
+    print("Saved. " + plural(len(group["expenses"]), "expense")
+          + " so far, total Rs. " + format_paise(total_spent(group)) + ".")
 
 
-def view_balances(the_ledger):
-    report_generator.print_balances(the_ledger.calculate_balances(),
-                                    "Balances - " + the_ledger.group.name)
+def menu_view_balances():
+    balances = calculate_balances(group)
+    print_balances(balances, "Balances - " + group["name"])
 
 
-def settle_up_plan(the_ledger):
-    plan = settlement_optimizer.plan_settlements(the_ledger)
-    report_generator.print_settlement_plan(plan, "Settle-up plan - " + the_ledger.group.name)
+def menu_settle_up():
+    balances = calculate_balances(group)
+    payments = simplify_debts(balances)
+    print_settlement_plan(payments, "Settle-up plan - " + group["name"])
 
 
-def confirm_exit():
+def menu_exit():
+    # Returns True if the user really wants to quit
     print("Warning: SplitSquad keeps everything in memory only.")
     print("All members and expenses will be lost when you exit.")
-    return ask("Exit anyway? (y/n): ").lower() in ("y", "yes")
+    answer = input("Exit anyway? (y/n): ").strip().lower()
+    return answer == "y" or answer == "yes"
 
-
-# ----------------------------------------------------------------------
-# Main loop
-# ----------------------------------------------------------------------
 
 def main():
     print("=== SplitSquad (in-memory session) ===")
-    name = ask("Group name (blank = 'My Group'): ") or "My Group"
-    group = models.Group(name)
-    the_ledger = ledger.InMemoryLedger(group)
+    name = input("Group name (blank = 'My Group'): ").strip()
+    if name != "":
+        group["name"] = name
 
     while True:
         print()
-        print("--- " + group.name + ": " + plural(len(group.members), "member") + ", "
-              + plural(len(group.expenses), "expense") + " ---")
+        print("--- " + group["name"] + ": "
+              + plural(len(group["members"]), "member") + ", "
+              + plural(len(group["expenses"]), "expense") + " ---")
         print("1. Add Member")
         print("2. Add Expense")
         print("3. View Current Balances")
@@ -166,24 +165,27 @@ def main():
         print("5. Exit")
 
         try:
-            choice = ask("Choose an option: ")
+            choice = input("Choose an option: ").strip()
             print()
+
             if choice == "1":
-                add_member(group)
+                menu_add_member()
             elif choice == "2":
-                add_expense(group, the_ledger)
+                menu_add_expense()
             elif choice == "3":
-                view_balances(the_ledger)
+                menu_view_balances()
             elif choice == "4":
-                settle_up_plan(the_ledger)
+                menu_settle_up()
             elif choice == "5":
-                if confirm_exit():
+                if menu_exit():
                     print("Goodbye! Session data discarded.")
                     break
             else:
                 print("Please choose a number from 1 to 5.")
+
         except (EOFError, KeyboardInterrupt):
-            # Input stream closed or Ctrl+C: leave instead of looping forever.
+            # Input ran out or Ctrl+C was pressed. This has to come before
+            # "except Exception", otherwise the loop would never end.
             print()
             print("Exiting. Session data discarded.")
             break

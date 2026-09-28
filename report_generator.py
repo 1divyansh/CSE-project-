@@ -1,120 +1,117 @@
-"""
-report_generator.py - Terminal tables for SplitSquad.
-
-Terminal output only (no files) and no imports beyond our own modules.
-Tables are built with str.ljust() / str.rjust() and plain concatenation.
-"""
+# report_generator.py
+# Prints tables on the screen using only ljust() and rjust().
+# Nothing is written to a file.
 
 from models import format_paise
 
 
-def _money(paise, signed=False):
-    """Paise -> '1250.50'; with signed=True positive values get a '+'."""
-    if signed and paise > 0:
-        return "+" + format_paise(paise)
-    return format_paise(paise)
-
-
-def format_table(headers, rows, align, footer=None):
-    """
-    Build an ASCII table as a string.
-
-    headers : list of column titles
-    rows    : list of rows, each a list of strings
-    align   : one letter per column, 'l' (left) or 'r' (right), e.g. "lrl"
-    footer  : optional totals row, drawn under its own separator
-    """
-    all_rows = [headers] + rows
-    if footer is not None:
-        all_rows = all_rows + [footer]
-
-    # Column width = longest cell in that column.
+def get_column_widths(headers, rows):
+    # Each column is as wide as the longest text in it
     widths = []
-    for col in range(len(headers)):
-        width = 0
-        for row in all_rows:
-            if len(row[col]) > width:
-                width = len(row[col])
-        widths.append(width)
+    for column in range(len(headers)):
+        widest = len(headers[column])
+        for row in rows:
+            if len(row[column]) > widest:
+                widest = len(row[column])
+        widths.append(widest)
+    return widths
 
-    def separator():
-        parts = []
-        for width in widths:
-            parts.append("-" * (width + 2))
-        return "+" + "+".join(parts) + "+"
 
-    def line(cells):
-        parts = []
-        for col in range(len(cells)):
-            if align[col] == "r":
-                parts.append(" " + cells[col].rjust(widths[col]) + " ")
-            else:
-                parts.append(" " + cells[col].ljust(widths[col]) + " ")
-        return "|" + "|".join(parts) + "|"
+def make_border(widths):
+    # Makes a line like +--------+---------+
+    line = "+"
+    for width in widths:
+        line = line + "-" * (width + 2) + "+"
+    return line
 
-    lines = [separator(), line(headers), separator()]
+
+def make_row(cells, widths, alignments):
+    # Makes a line like | Rahul  |  250.00 |
+    # alignments has one letter per column: "l" = left, "r" = right
+    line = "|"
+    for column in range(len(cells)):
+        if alignments[column] == "r":
+            text = cells[column].rjust(widths[column])
+        else:
+            text = cells[column].ljust(widths[column])
+        line = line + " " + text + " |"
+    return line
+
+
+def print_table(headers, rows, alignments, total_row):
+    # Measure every row (including the total row) so the columns line up
+    all_rows = []
     for row in rows:
-        lines.append(line(row))
-    lines.append(separator())
-    if footer is not None:
-        lines.append(line(footer))
-        lines.append(separator())
-    return "\n".join(lines)
+        all_rows.append(row)
+    all_rows.append(total_row)
+    widths = get_column_widths(headers, all_rows)
+
+    border = make_border(widths)
+    print(border)
+    print(make_row(headers, widths, alignments))
+    print(border)
+    for row in rows:
+        print(make_row(row, widths, alignments))
+    print(border)
+    print(make_row(total_row, widths, alignments))
+    print(border)
 
 
-def _heading(text):
-    return text + "\n" + "=" * len(text)
+def print_title(title):
+    print(title)
+    print("=" * len(title))
 
 
-def print_balances(balances, title="Balances"):
-    """
-    Print each member's net balance.
-    balances: {name: paise} from InMemoryLedger.calculate_balances().
-    """
-    print(_heading(title))
+def print_balances(balances, title):
+    print_title(title)
+
     if len(balances) == 0:
         print("No members yet.")
         return
 
     rows = []
     total = 0
-    for name in balances:
-        amount = balances[name]
+    for person in balances:
+        amount = balances[person]
+
         if amount > 0:
+            balance_text = "+" + format_paise(amount)
             status = "gets back " + format_paise(amount)
         elif amount < 0:
+            balance_text = format_paise(amount)
             status = "owes " + format_paise(-amount)
         else:
+            balance_text = format_paise(amount)
             status = "settled up"
-        rows.append([name, _money(amount, signed=True), status])
-        total += amount
 
-    print(format_table(["Member", "Balance (Rs.)", "Status"], rows, "lrl",
-                       footer=["Total", _money(total), ""]))
+        rows.append([person, balance_text, status])
+        total = total + amount
+
+    # The total should always be 0.00 (the zero-sum rule)
+    total_row = ["Total", format_paise(total), ""]
+    print_table(["Member", "Balance (Rs.)", "Status"], rows, "lrl", total_row)
 
 
-def print_settlement_plan(settlements, title="Settle-up plan"):
-    """
-    Print who pays whom.
-    settlements: list of Settlement objects from settlement_optimizer.simplify_debts().
-    """
-    print(_heading(title))
-    if len(settlements) == 0:
+def print_settlement_plan(payments, title):
+    print_title(title)
+
+    if len(payments) == 0:
         print("Everyone is settled up. Nothing to pay.")
         return
 
     rows = []
     total = 0
     number = 1
-    for settlement in settlements:
-        rows.append([str(number), settlement.payer, "pays", settlement.payee,
-                     _money(settlement.amount)])
-        total += settlement.amount
-        number += 1
+    for payment in payments:
+        rows.append([str(number), payment["payer"], "pays", payment["payee"],
+                     format_paise(payment["amount"])])
+        total = total + payment["amount"]
+        number = number + 1
 
-    print(format_table(["#", "From", "", "To", "Amount (Rs.)"], rows, "rlllr",
-                       footer=["", "", "", "Total", _money(total)]))
-    if len(settlements) == 1:
+    total_row = ["", "", "", "Total", format_paise(total)]
+    print_table(["#", "From", "", "To", "Amount (Rs.)"], rows, "rlllr", total_row)
+
+    if len(payments) == 1:
         print("1 payment settles every debt.")
     else:
-        print(str(len(settlements)) + " payments settle every debt.")
+        print(str(len(payments)) + " payments settle every debt.")

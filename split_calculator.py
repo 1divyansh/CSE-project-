@@ -1,171 +1,149 @@
-"""
-split_calculator.py - Work out how much each member owes for an expense.
+# split_calculator.py
+# Works out how much each person owes for one expense.
+#
+# Every function returns a dict like {"Rahul": 3334, "Aman": 3333, ...}
+# and the numbers ALWAYS add up to exactly the total, so no paisa is lost.
+#
+# The trick for rounding uses only // and %:
+#   Rs. 100 between 3 people = 10000 paise
+#   10000 // 3 = 3333   -> everyone pays this much
+#   10000 % 3  = 1      -> 1 paisa is left over
+#   The left over paise are given out one by one to the first people,
+#   so the result is 3334, 3333, 3333 (adds up to 10000).
 
-No imports beyond our own modules: only //, %, * and + are used.
-Money is integer paise, and every function returns a dict
-{member_name: paise_owed} whose values add up to EXACTLY the total.
-
-Rounding rule (no paisa is ever dropped):
-  1. Everyone gets the rounded-down amount, found with //.
-  2. The paise left over, found with %, are handed out one at a time
-     to the first few members in the list.
-
-      split_equal(10000, ["Asha", "Ravi", "Meera"])
-      10000 // 3 = 3333 each,  10000 % 3 = 1 paisa left over
-      -> {"Asha": 3334, "Ravi": 3333, "Meera": 3333}
-"""
-
-from models import SPLIT_EQUAL, SPLIT_EXACT, SPLIT_PERCENTAGE, SPLIT_SHARES
-from validator import ValidationError, validate_exact_split, validate_percentages
+from validator import check_exact_split, check_percentages
 
 
-# ----------------------------------------------------------------------
-# Checks shared by every split
-# ----------------------------------------------------------------------
-
-def _check_inputs(total, members):
+def check_people(total, people):
+    # Checks that are the same for every type of split
     if total <= 0:
-        raise ValidationError("Total must be greater than zero")
-    if len(members) == 0:
-        raise ValidationError("The split needs at least one person")
-    seen = []
-    for name in members:
-        if name in seen:
-            raise ValidationError(name + " is listed twice in the split")
-        seen.append(name)
+        raise ValueError("Total must be greater than zero")
+    if len(people) == 0:
+        raise ValueError("The split needs at least one person")
+
+    already_seen = []
+    for person in people:
+        if person in already_seen:
+            raise ValueError(person + " is listed twice in the split")
+        already_seen.append(person)
 
 
-def _check_values_match(members, values, label):
-    """Every member needs exactly one value, and no one else may have one."""
-    for name in members:
-        if name not in values:
-            raise ValidationError("Missing " + label + " for " + name)
-    for name in values:
-        if name not in members:
-            raise ValidationError(name + " has a " + label + " but is not in the split")
+def check_everyone_has_a_value(people, values, what):
+    # Every person in the split needs a value, and nobody else should have one
+    for person in people:
+        if person not in values:
+            raise ValueError("Missing " + what + " for " + person)
+    for person in values:
+        if person not in people:
+            raise ValueError(person + " has a " + what + " but is not in the split")
 
 
-def _split_by_weights(total, members, weights):
-    """
-    Split `total` in proportion to whole-number `weights` {name: weight}.
+def split_equal(total, people):
+    check_people(total, people)
 
-    Each person first gets (total * weight) // sum_of_weights. Rounding down
-    leaves a few paise unassigned, and those go one each to the first
-    members in the list who were actually rounded down, i.e. whose
-    (total * weight) % sum_of_weights is not 0. Anyone whose share came out
-    exact (including a weight of 0) never receives a stray paisa, and there
-    are always enough rounded-down members to absorb the leftover.
-    """
-    weight_sum = 0
-    for name in members:
-        weight_sum += weights[name]
-
-    result = {}
-    rounded_down = []
-    assigned = 0
-    for name in members:
-        result[name] = (total * weights[name]) // weight_sum
-        assigned += result[name]
-        if (total * weights[name]) % weight_sum != 0:
-            rounded_down.append(name)
-
-    leftover = total - assigned
-    for position in range(leftover):
-        result[rounded_down[position]] += 1
-    return result
-
-
-# ----------------------------------------------------------------------
-# The four split types
-# ----------------------------------------------------------------------
-
-def split_equal(total, members):
-    """
-    Everyone pays the same; the first (total % n) people pay 1 paisa more.
-        split_equal(10000, ["Asha", "Ravi", "Meera"])
-            -> {"Asha": 3334, "Ravi": 3333, "Meera": 3333}
-    """
-    _check_inputs(total, members)
-    count = len(members)
-    base = total // count
-    extra = total % count
+    number_of_people = len(people)
+    each_pays = total // number_of_people
+    left_over = total % number_of_people
 
     result = {}
     position = 0
-    for name in members:
-        if position < extra:
-            result[name] = base + 1
+    for person in people:
+        if position < left_over:
+            # The first few people pay one extra paisa
+            result[person] = each_pays + 1
         else:
-            result[name] = base
-        position += 1
+            result[person] = each_pays
+        position = position + 1
     return result
 
 
-def split_exact(total, members, amounts):
-    """
-    Each person owes a stated amount in paise; they must add up to the total.
-        split_exact(10000, ["Asha", "Ravi"], {"Asha": 7000, "Ravi": 3000})
-            -> {"Asha": 7000, "Ravi": 3000}
-    """
-    _check_inputs(total, members)
-    _check_values_match(members, amounts, "amount")
-    validate_exact_split(total, amounts)
+def split_exact(total, people, amounts):
+    # The user already typed how much each person owes
+    check_people(total, people)
+    check_everyone_has_a_value(people, amounts, "amount")
+    check_exact_split(total, amounts)
 
     result = {}
-    for name in members:
-        result[name] = amounts[name]
+    for person in people:
+        result[person] = amounts[person]
     return result
 
 
-def split_percentage(total, members, percentages):
-    """
-    percentages: {name: hundredths of a percent}, as returned by
-    validator.parse_percentage ("50" -> 5000, "33.33" -> 3333).
-    They must add up to 10000 (100%).
-        split_percentage(10000, ["Asha", "Ravi"], {"Asha": 7000, "Ravi": 3000})
-            -> {"Asha": 7000, "Ravi": 3000}
-    """
-    _check_inputs(total, members)
-    _check_values_match(members, percentages, "percentage")
-    for name in members:
-        if percentages[name] < 0:
-            raise ValidationError(name + "'s percentage cannot be negative")
-    validate_percentages(percentages)
-    return _split_by_weights(total, members, percentages)
+def split_by_weights(total, people, weights):
+    # Used by both percentage and shares splits.
+    # Each person pays total * their_weight / all_weights, rounded down.
+    # We multiply first and divide last so we only lose the tiny fraction
+    # at the very end.
+    all_weights = 0
+    for person in people:
+        all_weights = all_weights + weights[person]
+
+    result = {}
+    given_out = 0
+    people_rounded_down = []
+
+    for person in people:
+        top = total * weights[person]
+        result[person] = top // all_weights
+        given_out = given_out + result[person]
+
+        # If there is a remainder, this person's share got rounded down
+        if top % all_weights != 0:
+            people_rounded_down.append(person)
+
+    # Hand out the missing paise one each, to the first people who were
+    # rounded down. Someone whose share was already exact never gets one.
+    # (There are always more rounded-down people than missing paise.)
+    missing_paise = total - given_out
+    position = 0
+    while position < missing_paise:
+        person = people_rounded_down[position]
+        result[person] = result[person] + 1
+        position = position + 1
+
+    return result
 
 
-def split_shares(total, members, shares):
-    """
-    shares: {name: whole number of shares}, e.g. 2 for a couple, 1 for a single.
-    A share of 0 means the person owes nothing.
-        split_shares(10000, ["Asha", "Ravi", "Meera"], {"Asha": 2, "Ravi": 1, "Meera": 1})
-            -> {"Asha": 5000, "Ravi": 2500, "Meera": 2500}
-    """
-    _check_inputs(total, members)
-    _check_values_match(members, shares, "share count")
-    share_total = 0
-    for name in members:
-        if shares[name] < 0:
-            raise ValidationError(name + "'s shares cannot be negative")
-        share_total += shares[name]
-    if share_total == 0:
-        raise ValidationError("At least one person must have more than 0 shares")
-    return _split_by_weights(total, members, shares)
+def split_percentage(total, people, percentages):
+    # percentages are in hundredths, e.g. 50% is 5000
+    check_people(total, people)
+    check_everyone_has_a_value(people, percentages, "percentage")
+    for person in people:
+        if percentages[person] < 0:
+            raise ValueError(person + "'s percentage cannot be negative")
+    check_percentages(percentages)
+    return split_by_weights(total, people, percentages)
 
 
-def calculate_split(split_type, total, members, values=None):
-    """
-    Run the right split by name. `values` is the per-person dict needed by
-    exact, percentage and shares splits; it is ignored for equal splits.
-    """
-    if split_type == SPLIT_EQUAL:
-        return split_equal(total, members)
+def split_shares(total, people, shares):
+    # shares are whole numbers, e.g. a couple = 2, a single person = 1
+    check_people(total, people)
+    check_everyone_has_a_value(people, shares, "share count")
+
+    total_shares = 0
+    for person in people:
+        if shares[person] < 0:
+            raise ValueError(person + "'s shares cannot be negative")
+        total_shares = total_shares + shares[person]
+
+    if total_shares == 0:
+        raise ValueError("At least one person must have more than 0 shares")
+    return split_by_weights(total, people, shares)
+
+
+def calculate_split(split_type, total, people, values):
+    # Picks the right split function. values is None for an equal split.
+    if split_type == "equal":
+        return split_equal(total, people)
+
     if values is None:
-        raise ValidationError("A " + split_type + " split needs a value for each person")
-    if split_type == SPLIT_EXACT:
-        return split_exact(total, members, values)
-    if split_type == SPLIT_PERCENTAGE:
-        return split_percentage(total, members, values)
-    if split_type == SPLIT_SHARES:
-        return split_shares(total, members, values)
-    raise ValidationError("Unknown split type: " + str(split_type))
+        raise ValueError("A " + split_type + " split needs a value for each person")
+
+    if split_type == "exact":
+        return split_exact(total, people, values)
+    if split_type == "percentage":
+        return split_percentage(total, people, values)
+    if split_type == "shares":
+        return split_shares(total, people, values)
+
+    raise ValueError("Unknown split type: " + split_type)
